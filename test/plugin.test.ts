@@ -1,5 +1,8 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test"
+import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test"
 import { createOpencodeClient } from "@opencode-ai/sdk"
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
 
 // Mock the SandboxManager before importing the plugin
 const mockInitialize = mock(() => Promise.resolve())
@@ -35,12 +38,32 @@ const makeCtx = (
 })
 
 describe("SandboxPlugin", () => {
+  // Point XDG_CONFIG_HOME at an empty temp dir so tests never pick up the
+  // developer's real sandbox config (e.g. one running in enforce mode).
+  let testConfigHome: string | undefined
+  let isolatedConfigHome: string | undefined
+
+  beforeAll(() => {
+    testConfigHome = process.env.XDG_CONFIG_HOME
+    isolatedConfigHome = fs.mkdtempSync(
+      path.join(os.tmpdir(), "opencode-sandbox-plugin-test-"),
+    )
+    process.env.XDG_CONFIG_HOME = isolatedConfigHome
+  })
+
+  afterAll(() => {
+    if (isolatedConfigHome) fs.rmSync(isolatedConfigHome, { force: true, recursive: true })
+    if (testConfigHome === undefined) delete process.env.XDG_CONFIG_HOME
+    else process.env.XDG_CONFIG_HOME = testConfigHome
+  })
+
   beforeEach(() => {
     mockInitialize.mockClear()
     mockWrapWithSandbox.mockClear()
     mockCleanupAfterCommand.mockClear()
     delete process.env.OPENCODE_DISABLE_SANDBOX
     delete process.env.OPENCODE_SANDBOX_CONFIG
+    delete process.env.OPENCODE_SANDBOX_CONFIG_PATH
     delete process.env.OPENCODE_SERVER_PASSWORD
     delete process.env.OPENCODE_SERVER_USERNAME
   })
