@@ -115,16 +115,29 @@ export function resolveConfig(
   }
 }
 
-export function getConfigDir(): string {
-  const xdgConfig = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config")
-  return path.join(xdgConfig, "opencode-sandbox")
+function xdgConfigDir(): string {
+  return process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config")
+}
+
+export function getLegacyConfigDir(): string {
+  return path.join(xdgConfigDir(), "opencode-sandbox")
+}
+
+export function getOpenCodeConfigDir(): string {
+  return path.join(xdgConfigDir(), "opencode")
 }
 
 async function tryLoadJsonFile(filePath: string): Promise<SandboxPluginConfig | null> {
+  let content: string
   try {
-    const content = await fs.readFile(filePath, "utf-8")
+    content = await fs.readFile(filePath, "utf-8")
+  } catch {
+    return null
+  }
+  try {
     return JSON.parse(content) as SandboxPluginConfig
   } catch {
+    console.warn(`[opencode-sandbox] Invalid JSON in config file: ${filePath}`)
     return null
   }
 }
@@ -139,16 +152,34 @@ export async function loadConfig(projectDir: string): Promise<SandboxPluginConfi
     }
   }
 
-  const configDir = getConfigDir()
+  const envConfigPath = process.env.OPENCODE_SANDBOX_CONFIG_PATH
+  if (envConfigPath) {
+    const customConfig = await tryLoadJsonFile(envConfigPath)
+    if (customConfig) return customConfig
+    console.warn(
+      `[opencode-sandbox] Failed to load config from OPENCODE_SANDBOX_CONFIG_PATH: ${envConfigPath}`,
+    )
+  }
 
+  const legacyConfigDir = getLegacyConfigDir()
+  const openCodeConfigDir = getOpenCodeConfigDir()
   const projectName = path.basename(projectDir)
-  const projectConfig = await tryLoadJsonFile(
-    path.join(configDir, "projects", `${projectName}.json`),
-  )
-  if (projectConfig) return projectConfig
 
-  const globalConfig = await tryLoadJsonFile(path.join(configDir, "config.json"))
-  if (globalConfig) return globalConfig
+  const standardProjectConfig = await tryLoadJsonFile(
+    path.join(openCodeConfigDir, "projects", `${projectName}.sandbox.json`),
+  )
+  if (standardProjectConfig) return standardProjectConfig
+
+  const legacyProjectConfig = await tryLoadJsonFile(
+    path.join(legacyConfigDir, "projects", `${projectName}.json`),
+  )
+  if (legacyProjectConfig) return legacyProjectConfig
+
+  const standardGlobalConfig = await tryLoadJsonFile(path.join(openCodeConfigDir, "sandbox.json"))
+  if (standardGlobalConfig) return standardGlobalConfig
+
+  const legacyGlobalConfig = await tryLoadJsonFile(path.join(legacyConfigDir, "config.json"))
+  if (legacyGlobalConfig) return legacyGlobalConfig
 
   return {}
 }

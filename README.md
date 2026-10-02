@@ -129,16 +129,19 @@ Everything else is **blocked by default**.
 
 ## Configuration
 
-Config files are stored outside the project directory (in `~/.config/opencode-sandbox/`) so that sandboxed commands cannot modify them. This prevents indirect prompt injection from weakening the sandbox by overwriting the config.
+Config files are stored outside the project directory (in `~/.config/opencode/` or `~/.config/opencode-sandbox/`) so that sandboxed commands cannot modify them. This prevents indirect prompt injection from weakening the sandbox by overwriting the config.
 
 ### Config file locations
 
 The plugin searches for configuration in this order (first match wins):
 
 1. **Environment variable** `OPENCODE_SANDBOX_CONFIG` (JSON string)
-2. **Per-project config** `~/.config/opencode-sandbox/projects/<project-name>.json`
-3. **Global config** `~/.config/opencode-sandbox/config.json`
-4. **Built-in defaults**
+2. **Environment variable** `OPENCODE_SANDBOX_CONFIG_PATH` (path to a JSON config file)
+3. **Per-project config** `~/.config/opencode/projects/<project-name>.sandbox.json`
+4. **Legacy per-project config** `~/.config/opencode-sandbox/projects/<project-name>.json`
+5. **Global config** `~/.config/opencode/sandbox.json`
+6. **Legacy global config** `~/.config/opencode-sandbox/config.json`
+7. **Built-in defaults**
 
 The `<project-name>` is the basename of the project directory (e.g., `my-app` for `/home/user/projects/my-app`).
 
@@ -147,7 +150,7 @@ If `XDG_CONFIG_HOME` is set, it is used instead of `~/.config`.
 ### Example: Global config
 
 ```json
-// ~/.config/opencode-sandbox/config.json
+// ~/.config/opencode/sandbox.json
 {
   "mode": "enforce",
   "filesystem": {
@@ -182,7 +185,7 @@ Path precedence is inherited from `@anthropic-ai/sandbox-runtime`:
 If your Git workflow needs to read a public key (for example `~/.ssh/id_ed25519.pub`) while keeping `~/.ssh` blocked by default, re-allow only that file:
 
 ```json
-// ~/.config/opencode-sandbox/config.json
+// ~/.config/opencode/sandbox.json
 {
   "filesystem": {
     "denyRead": [
@@ -206,7 +209,7 @@ If your Git workflow needs to read a public key (for example `~/.ssh/id_ed25519.
 ### Example: Per-project config
 
 ```json
-// ~/.config/opencode-sandbox/projects/my-app.json
+// ~/.config/opencode/projects/my-app.sandbox.json
 {
   "network": {
     "allowedDomains": ["my-internal-api.company.com"]
@@ -214,10 +217,18 @@ If your Git workflow needs to read a public key (for example `~/.ssh/id_ed25519.
 }
 ```
 
-### Environment variable
+### Environment variables
+
+`OPENCODE_SANDBOX_CONFIG` holds the configuration inline as a JSON string:
 
 ```bash
 OPENCODE_SANDBOX_CONFIG='{"filesystem":{"denyRead":["~/.ssh"]},"network":{"allowedDomains":["github.com"]}}' opencode
+```
+
+`OPENCODE_SANDBOX_CONFIG_PATH` points at an existing JSON config file instead:
+
+```bash
+OPENCODE_SANDBOX_CONFIG_PATH=~/.config/opencode/sandbox.json opencode
 ```
 
 Example allowing only the SSH public key to be read:
