@@ -1,18 +1,17 @@
 {
   "name": "opencode-sandbox",
   "version": "0.6.0",
-  "description": "OpenCode plugin that sandboxes agent commands using @anthropic-ai/sandbox-runtime (seatbelt on macOS, bubblewrap on Linux)",
-  "oc-plugin": [
-    "server"
-  ],
+  "description": "OpenCode 2 plugin that sandboxes agent commands using @anthropic-ai/sandbox-runtime (seatbelt on macOS, bubblewrap on Linux)",
+  "engines": {
+    "opencode": ">=2.0.0"
+  },
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    }
+    ".": "./dist/index.js",
+    "./server": "./dist/index.js",
+    "./tui": "./dist/tui.js"
   },
   "files": [
     "dist",
@@ -20,8 +19,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "bun build ./src/index.ts --outdir dist --target node --format esm --external @anthropic-ai/sandbox-runtime --external @opencode-ai/plugin && bun x tsc --emitDeclarationOnly --declaration --outDir dist",
-    "dev": "bun run --watch src/index.ts",
+    "build": "bun build ./src/index.ts ./src/tui.tsx --outdir dist --target node --format esm --external @anthropic-ai/sandbox-runtime --external @opencode/plugin --external '@opencode/plugin/*' --external @opentui/core --external '@opentui/*' --external solid-js && bun x tsc --emitDeclarationOnly --declaration --outDir dist",
     "test": "bun test",
     "test:coverage": "bun test --coverage",
     "lint": "biome lint .",
@@ -61,13 +59,21 @@
     "@anthropic-ai/sandbox-runtime": "^0.0.76"
   },
   "peerDependencies": {
-    "@opencode-ai/plugin": ">=1.0.0"
+    "@opencode/plugin": ">=2.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@opencode/plugin": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@biomejs/biome": "^2.0.0",
-    "@opencode-ai/plugin": "^1.2.1",
-    "@opencode-ai/sdk": "^1.2.1",
+    "@opencode/plugin": "2.0.22",
+    "@opencode/theme": "^2.0.22",
+    "@opentui/core": "^0.5.14",
+    "@opentui/solid": "^0.5.14",
     "@types/bun": "^1.3.9",
+    "solid-js": "^1.9.15",
     "typescript": "^7.0.2"
   }
 }
