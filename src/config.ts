@@ -77,6 +77,13 @@ function isSafeWritePath(p: string): boolean {
   return true
 }
 
+/** Resolve a user-supplied path relative to projectDir if it is not
+ * absolute and does not start with ~ (which the runtime expands). */
+function resolveUserPath(p: string, projectDir: string): string {
+  if (p.startsWith("/") || p.startsWith("~")) return p
+  return path.resolve(projectDir, p)
+}
+
 export function resolveConfig(
   projectDir: string,
   worktree: string,
@@ -86,17 +93,22 @@ export function resolveConfig(
 
   const candidatePaths = [projectDir, worktree, os.tmpdir()].filter(Boolean)
   const safePaths = candidatePaths.filter((p) => isSafeWritePath(p))
-  const writePaths = user?.filesystem?.allowWrite ?? [
-    ...new Set(safePaths.map((p) => path.resolve(p))),
-  ]
+  const writePaths = user?.filesystem?.allowWrite
+    ? user.filesystem.allowWrite.map((p) => resolveUserPath(p, projectDir))
+    : [...new Set(safePaths.map((p) => path.resolve(p)))]
+
+  const userDenyRead = user?.filesystem?.denyRead
+  const userAllowRead = user?.filesystem?.allowRead
+  const userDenyWrite = user?.filesystem?.denyWrite
 
   return {
     filesystem: {
-      denyRead:
-        user?.filesystem?.denyRead ?? DEFAULT_DENY_READ_DIRS.map((p) => path.join(homeDir, p)),
-      allowRead: user?.filesystem?.allowRead ?? [],
+      denyRead: userDenyRead
+        ? userDenyRead.map((p) => resolveUserPath(p, projectDir))
+        : DEFAULT_DENY_READ_DIRS.map((p) => path.join(homeDir, p)),
+      allowRead: userAllowRead ? userAllowRead.map((p) => resolveUserPath(p, projectDir)) : [],
       allowWrite: writePaths,
-      denyWrite: user?.filesystem?.denyWrite ?? [],
+      denyWrite: userDenyWrite ? userDenyWrite.map((p) => resolveUserPath(p, projectDir)) : [],
     },
     network: {
       allowedDomains: user?.network?.allowedDomains ?? DEFAULT_ALLOWED_DOMAINS,
