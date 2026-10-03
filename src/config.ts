@@ -86,15 +86,9 @@ export function resolveConfig(
 
   const candidatePaths = [projectDir, worktree, os.tmpdir()].filter(Boolean)
   const safePaths = candidatePaths.filter((p) => isSafeWritePath(p))
-  const seen = new Set<string>()
   const writePaths =
     user?.filesystem?.allowWrite ??
-    safePaths.filter((p) => {
-      const resolved = path.resolve(p)
-      if (seen.has(resolved)) return false
-      seen.add(resolved)
-      return true
-    })
+    [...new Set(safePaths.map((p) => path.resolve(p)))]
 
   return {
     filesystem: {
@@ -112,6 +106,13 @@ export function resolveConfig(
       allowLocalBinding: user?.network?.allowLocalBinding ?? false,
     },
   }
+}
+
+export function isSandboxGloballyDisabled(): boolean {
+  return (
+    process.env.OPENCODE_DISABLE_SANDBOX === "1" ||
+    process.env.OPENCODE_DISABLE_SANDBOX === "true"
+  )
 }
 
 function xdgConfigDir(): string {
@@ -164,21 +165,17 @@ export async function loadConfig(projectDir: string): Promise<SandboxPluginConfi
   const openCodeConfigDir = getOpenCodeConfigDir()
   const projectName = path.basename(projectDir)
 
-  const standardProjectConfig = await tryLoadJsonFile(
+  const sources = [
     path.join(openCodeConfigDir, "projects", `${projectName}.sandbox.json`),
-  )
-  if (standardProjectConfig) return standardProjectConfig
-
-  const legacyProjectConfig = await tryLoadJsonFile(
     path.join(legacyConfigDir, "projects", `${projectName}.json`),
-  )
-  if (legacyProjectConfig) return legacyProjectConfig
+    path.join(openCodeConfigDir, "sandbox.json"),
+    path.join(legacyConfigDir, "config.json"),
+  ]
 
-  const standardGlobalConfig = await tryLoadJsonFile(path.join(openCodeConfigDir, "sandbox.json"))
-  if (standardGlobalConfig) return standardGlobalConfig
-
-  const legacyGlobalConfig = await tryLoadJsonFile(path.join(legacyConfigDir, "config.json"))
-  if (legacyGlobalConfig) return legacyGlobalConfig
+  for (const source of sources) {
+    const config = await tryLoadJsonFile(source)
+    if (config) return config
+  }
 
   return {}
 }

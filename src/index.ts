@@ -1,6 +1,6 @@
 import { SandboxManager } from "@anthropic-ai/sandbox-runtime"
 import { Plugin } from "@opencode/plugin"
-import { loadConfig, resolveConfig } from "./config"
+import { isSandboxGloballyDisabled, loadConfig, resolveConfig } from "./config"
 import { ENFORCEMENT_MESSAGE, ensureShim } from "./shim"
 import { cleanupOldToggleFiles, isSandboxToggledOff } from "./toggle"
 
@@ -17,10 +17,7 @@ const messageOf = (err: unknown) => (err instanceof Error ? err.message : String
 export default Plugin.define({
   id: "opencode-sandbox",
   async setup(ctx) {
-    if (
-      process.env.OPENCODE_DISABLE_SANDBOX === "1" ||
-      process.env.OPENCODE_DISABLE_SANDBOX === "true"
-    ) {
+    if (isSandboxGloballyDisabled()) {
       return
     }
 

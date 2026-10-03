@@ -2,7 +2,7 @@ import { Plugin } from "@opencode/plugin/tui"
 import type { RGBA } from "@opentui/core"
 import type { JSX } from "@opentui/solid/jsx-runtime"
 import { createSignal } from "solid-js"
-import { loadConfig } from "./config"
+import { isSandboxGloballyDisabled, loadConfig } from "./config"
 import { isSandboxToggledOff, setSandboxToggledOff } from "./toggle"
 
 type Color = string | RGBA
@@ -25,10 +25,7 @@ const colorOf = (color: StatefulColor): Color | undefined => color.default ?? co
 export default Plugin.define({
   id: "opencode-sandbox",
   async setup(ctx) {
-    if (
-      process.env.OPENCODE_DISABLE_SANDBOX === "1" ||
-      process.env.OPENCODE_DISABLE_SANDBOX === "true"
-    ) {
+    if (isSandboxGloballyDisabled()) {
       return
     }
 
