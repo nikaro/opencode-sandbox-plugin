@@ -1,7 +1,7 @@
 import { Plugin } from "@opencode/plugin/tui"
 import type { RGBA } from "@opentui/core"
 import type { JSX } from "@opentui/solid/jsx-runtime"
-import { createSignal } from "solid-js"
+import { createRoot, createSignal } from "solid-js"
 import { isSandboxGloballyDisabled, loadConfig } from "./config"
 import { isSandboxToggledOff, setSandboxToggledOff } from "./toggle"
 
@@ -30,17 +30,38 @@ export default Plugin.define({
     }
 
     const projectDir = ctx.location?.directory ?? ctx.data.location.default().directory
-    const config = await loadConfig(projectDir)
-    const configDisabled = config.disabled ?? false
-    const [toggledOff, setToggledOff] = createSignal(await isSandboxToggledOff(projectDir))
 
-    // The palette command flips the persisted state and the badge signal
-    // together; the server hooks re-read the file before every command.
+    // Signals and palette command must be set up synchronously so
+    // ctx.keymap.layer has a Solid owner.  The persisted toggle state is
+    // backfilled once the async read completes.
+    const [toggledOff, setToggledOff] = createSignal(false)
+
     const toggleSandbox = async () => {
-      const paused = await isSandboxToggledOff(projectDir)
+      const paused = toggledOff()
       await setSandboxToggledOff(projectDir, !paused)
       setToggledOff(!paused)
     }
+
+    // Register the palette command once at setup time.  createRoot guarantees
+    // a reactive owner so the layer registers even if setup is async.
+    const disposeLayer = createRoot((dispose) => {
+      ctx.keymap.layer(() => ({
+        commands: [
+          {
+            id: "opencode-sandbox.toggle",
+            title: "Toggle Sandbox",
+            description: "Pause or resume sandbox restrictions for this project",
+            palette: true,
+            run: toggleSandbox,
+          },
+        ],
+      }))
+      return dispose
+    })
+
+    const config = await loadConfig(projectDir)
+    const configDisabled = config.disabled ?? false
+    setToggledOff(await isSandboxToggledOff(projectDir))
 
     const text = ctx.theme.text as Text
 
@@ -67,30 +88,15 @@ export default Plugin.define({
       return <span style={{ fg: colorFor(status) }}>{`⊙ sandbox: ${status}`}</span>
     }
 
-    // A keymap layer is owned by the component that creates it, so each
-    // badge registers its own copy of the palette command: the keymap
-    // deduplicates commands by id, and whichever badge stays mounted keeps
-    // the command reachable as the other unmounts during navigation. The
-    // always-mounted app slot cannot host the registration — it sits outside
-    // the keymap provider, so the layer would never register.
-    const Badge = () => {
-      ctx.keymap.layer(() => ({
-        commands: [
-          {
-            id: "opencode-sandbox.toggle",
-            title: "Toggle Sandbox",
-            description: "Pause or resume sandbox restrictions for this project",
-            palette: true,
-            run: toggleSandbox,
-          },
-        ],
-      }))
-      return (
-        <box flexDirection="row" flexShrink={0}>
-          <text fg={text.default ?? text.base}>{liveLabel as unknown as JSX.Element}</text>
-        </box>
-      )
-    }
+    // A keymap layer is owned by the component that creates it.  The badge no
+    // longer registers the layer itself — it was being called inside a slot
+    // render function that lacks a Solid owner, so the layer silently failed to
+    // register.  The layer is now created once at setup time (see above).
+    const Badge = () => (
+      <box flexDirection="row" flexShrink={0}>
+        <text fg={text.default ?? text.base}>{liveLabel as unknown as JSX.Element}</text>
+      </box>
+    )
 
     const claims = [
       ctx.ui.slot({ append: "home.footer.status", render: Badge }),
@@ -99,6 +105,7 @@ export default Plugin.define({
 
     return () => {
       for (const dispose of claims) dispose()
+      disposeLayer()
     }
   },
 })
