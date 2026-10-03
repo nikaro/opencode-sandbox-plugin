@@ -31,9 +31,10 @@ export default Plugin.define({
 
     const projectDir = ctx.location?.directory ?? ctx.data.location.default().directory
 
-    // Signals and the palette command are created synchronously so they
-    // run inside the TUI's Solid component tree where the keymap provider
-    // is available.  Async work (config loading) happens afterwards.
+    // The signal must be created synchronously while Solid's owner context is
+    // still active; after an await the owner may be lost.  We initialise it
+    // with a placeholder and backfill the real value once the async toggle
+    // state has been read.
     const [toggledOff, setToggledOff] = createSignal(false)
 
     const toggleSandbox = async () => {
