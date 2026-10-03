@@ -42,18 +42,6 @@ export default Plugin.define({
       setToggledOff(!paused)
     }
 
-    ctx.keymap.layer(() => ({
-      commands: [
-        {
-          id: "opencode-sandbox.toggle",
-          title: "Toggle Sandbox",
-          description: "Pause or resume sandbox restrictions for this project",
-          palette: true,
-          run: toggleSandbox,
-        },
-      ],
-    }))
-
     const config = await loadConfig(projectDir)
     const configDisabled = config.disabled ?? false
     setToggledOff(await isSandboxToggledOff(projectDir))
@@ -83,13 +71,31 @@ export default Plugin.define({
       return <span style={{ fg: colorFor(status) }}>{`⊙ sandbox: ${status}`}</span>
     }
 
-    // The badge only renders the status label; the palette command is
-    // registered once at plugin setup time (see above).
-    const Badge = () => (
-      <box flexDirection="row" flexShrink={0}>
-        <text fg={text.default ?? text.base}>{liveLabel as unknown as JSX.Element}</text>
-      </box>
-    )
+    // The badge registers the palette command so the layer is owned by a
+    // mounted component (the slot renderer).  Without mode: "global" the layer
+    // defaults to the "base" input mode and the command disappears when the
+    // command palette opens its own mode.
+    const Badge = () => {
+      ctx.keymap.layer(() => ({
+        mode: "global",
+        commands: [
+          {
+            id: "opencode-sandbox.toggle",
+            title: "Toggle Sandbox",
+            description: "Enable or disable the sandbox for this project",
+            palette: true,
+            enabled: true,
+            run: toggleSandbox,
+          },
+        ],
+        bindings: ["opencode-sandbox.toggle"],
+      }))
+      return (
+        <box flexDirection="row" flexShrink={0}>
+          <text fg={text.default ?? text.base}>{liveLabel as unknown as JSX.Element}</text>
+        </box>
+      )
+    }
 
     const claims = [
       ctx.ui.slot({ append: "home.footer.status", render: Badge }),
