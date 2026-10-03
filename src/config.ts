@@ -86,9 +86,9 @@ export function resolveConfig(
 
   const candidatePaths = [projectDir, worktree, os.tmpdir()].filter(Boolean)
   const safePaths = candidatePaths.filter((p) => isSafeWritePath(p))
-  const writePaths =
-    user?.filesystem?.allowWrite ??
-    [...new Set(safePaths.map((p) => path.resolve(p)))]
+  const writePaths = user?.filesystem?.allowWrite ?? [
+    ...new Set(safePaths.map((p) => path.resolve(p))),
+  ]
 
   return {
     filesystem: {
@@ -110,21 +110,8 @@ export function resolveConfig(
 
 export function isSandboxGloballyDisabled(): boolean {
   return (
-    process.env.OPENCODE_DISABLE_SANDBOX === "1" ||
-    process.env.OPENCODE_DISABLE_SANDBOX === "true"
+    process.env.OPENCODE_DISABLE_SANDBOX === "1" || process.env.OPENCODE_DISABLE_SANDBOX === "true"
   )
-}
-
-function xdgConfigDir(): string {
-  return process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config")
-}
-
-export function getLegacyConfigDir(): string {
-  return path.join(xdgConfigDir(), "opencode-sandbox")
-}
-
-export function getOpenCodeConfigDir(): string {
-  return path.join(xdgConfigDir(), "opencode")
 }
 
 async function tryLoadJsonFile(filePath: string): Promise<SandboxPluginConfig | null> {
@@ -161,15 +148,16 @@ export async function loadConfig(projectDir: string): Promise<SandboxPluginConfi
     )
   }
 
-  const legacyConfigDir = getLegacyConfigDir()
-  const openCodeConfigDir = getOpenCodeConfigDir()
+  const configBase = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config")
+  const legacyDir = path.join(configBase, "opencode-sandbox")
+  const standardDir = path.join(configBase, "opencode")
   const projectName = path.basename(projectDir)
 
   const sources = [
-    path.join(openCodeConfigDir, "projects", `${projectName}.sandbox.json`),
-    path.join(legacyConfigDir, "projects", `${projectName}.json`),
-    path.join(openCodeConfigDir, "sandbox.json"),
-    path.join(legacyConfigDir, "config.json"),
+    path.join(standardDir, "projects", `${projectName}.sandbox.json`),
+    path.join(legacyDir, "projects", `${projectName}.json`),
+    path.join(standardDir, "sandbox.json"),
+    path.join(legacyDir, "config.json"),
   ]
 
   for (const source of sources) {
