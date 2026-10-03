@@ -1,4 +1,5 @@
-import fs from "node:fs/promises"
+import fs from "node:fs"
+import fsPromises from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import type { SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime"
@@ -89,12 +90,22 @@ export function resolveConfig(
   worktree: string,
   user?: SandboxPluginConfig,
 ): SandboxRuntimeConfig {
+  // macOS resolves symlinks before applying sandbox filters, so relative
+  // globs and projectDir-anchored rules must be built from the canonical
+  // path or the profile will not match.
+  let canonicalProjectDir: string
+  try {
+    canonicalProjectDir = fs.realpathSync(projectDir)
+  } catch {
+    canonicalProjectDir = path.resolve(projectDir)
+  }
+
   const homeDir = os.homedir()
 
   const candidatePaths = [projectDir, worktree, os.tmpdir()].filter(Boolean)
   const safePaths = candidatePaths.filter((p) => isSafeWritePath(p))
   const writePaths = user?.filesystem?.allowWrite
-    ? user.filesystem.allowWrite.map((p) => resolveUserPath(p, projectDir))
+    ? user.filesystem.allowWrite.map((p) => resolveUserPath(p, canonicalProjectDir))
     : [...new Set(safePaths.map((p) => path.resolve(p)))]
 
   const userDenyRead = user?.filesystem?.denyRead
@@ -104,11 +115,15 @@ export function resolveConfig(
   return {
     filesystem: {
       denyRead: userDenyRead
-        ? userDenyRead.map((p) => resolveUserPath(p, projectDir))
+        ? userDenyRead.map((p) => resolveUserPath(p, canonicalProjectDir))
         : DEFAULT_DENY_READ_DIRS.map((p) => path.join(homeDir, p)),
-      allowRead: userAllowRead ? userAllowRead.map((p) => resolveUserPath(p, projectDir)) : [],
+      allowRead: userAllowRead
+        ? userAllowRead.map((p) => resolveUserPath(p, canonicalProjectDir))
+        : [],
       allowWrite: writePaths,
-      denyWrite: userDenyWrite ? userDenyWrite.map((p) => resolveUserPath(p, projectDir)) : [],
+      denyWrite: userDenyWrite
+        ? userDenyWrite.map((p) => resolveUserPath(p, canonicalProjectDir))
+        : [],
     },
     network: {
       allowedDomains: user?.network?.allowedDomains ?? DEFAULT_ALLOWED_DOMAINS,
@@ -129,7 +144,7 @@ export function isSandboxGloballyDisabled(): boolean {
 async function tryLoadJsonFile(filePath: string): Promise<SandboxPluginConfig | null> {
   let content: string
   try {
-    content = await fs.readFile(filePath, "utf-8")
+    content = await fsPromises.readFile(filePath, "utf-8")
   } catch {
     return null
   }
