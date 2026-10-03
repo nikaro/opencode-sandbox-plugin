@@ -117,6 +117,44 @@ describe("resolveConfig", () => {
     expect(projectCount).toBe(1)
   })
 
+  test("resolves relative user paths against projectDir", () => {
+    const user: SandboxPluginConfig = {
+      filesystem: {
+        denyRead: [".env*", "*.key"],
+        allowRead: [".env.example"],
+        allowWrite: ["."],
+        denyWrite: ["*.pem", "sandbox.json"],
+      },
+    }
+    const config = resolveConfig("/project", WORKTREE, user)
+
+    expect(config.filesystem?.denyRead).toEqual([
+      path.resolve("/project", ".env*"),
+      path.resolve("/project", "*.key"),
+    ])
+    expect(config.filesystem?.allowRead).toEqual([path.resolve("/project", ".env.example")])
+    expect(config.filesystem?.allowWrite).toEqual([path.resolve("/project", ".")])
+    expect(config.filesystem?.denyWrite).toEqual([
+      path.resolve("/project", "*.pem"),
+      path.resolve("/project", "sandbox.json"),
+    ])
+  })
+
+  test("leaves absolute and tilde paths untouched", () => {
+    const user: SandboxPluginConfig = {
+      filesystem: {
+        denyRead: ["/absolute", "~/.ssh"],
+        allowWrite: ["~/. cache", "/tmp"],
+        denyWrite: ["/etc/passwd", "~/.env"],
+      },
+    }
+    const config = resolveConfig("/project", WORKTREE, user)
+
+    expect(config.filesystem?.denyRead).toEqual(["/absolute", "~/.ssh"])
+    expect(config.filesystem?.allowWrite).toEqual(["~/. cache", "/tmp"])
+    expect(config.filesystem?.denyWrite).toEqual(["/etc/passwd", "~/.env"])
+  })
+
   test("handles unix socket config", () => {
     const user: SandboxPluginConfig = {
       network: {
