@@ -2,8 +2,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-export const ENFORCEMENT_MESSAGE =
-  "opencode-sandbox: sandbox unavailable in enforce mode; command blocked"
+export const ENFORCEMENT_MESSAGE = "opencode-sandbox: sandbox unavailable; command blocked"
 
 // The shim defers to a command string the host prepared with
 // SandboxManager.wrapWithSandbox(); `realShell -c <wrapped>` is exactly what

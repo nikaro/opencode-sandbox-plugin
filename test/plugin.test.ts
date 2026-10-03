@@ -26,6 +26,8 @@ const pluginModule = await import("../src/index")
 // a working re-export of the server module.
 const rootModule = await import("../index")
 
+const toggleModule = await import("../src/toggle")
+
 // Isolated cache dir so shim writes never touch the developer's real home
 let testCacheHome: string | undefined
 let isolatedCacheHome: string | undefined
@@ -158,6 +160,8 @@ describe("plugin", () => {
     expect(hooks["create.before"]).toBeUndefined()
   })
 
+  const TEST_PROJECT = "/tmp/project"
+
   test("swaps the shell for a shim and leaves the command untouched", async () => {
     if (process.platform === "win32") return
     const { hooks } = await setupPlugin()
@@ -196,7 +200,7 @@ describe("plugin", () => {
     expect(fs.existsSync(path.join(shimDir(), "sandbox", "zsh"))).toBe(false)
   })
 
-  test("audit mode: wrap failure leaves the invocation unsandboxed", async () => {
+  test("wrap failure installs the blocked shim", async () => {
     if (process.platform === "win32") return
     mockWrapWithSandbox.mockImplementation(() => Promise.reject(new Error("boom")))
     const { hooks } = await setupPlugin()
@@ -205,29 +209,14 @@ describe("plugin", () => {
     await hooks["create.before"]?.(invocation)
 
     expect(invocation.command).toBe("echo hello")
-    expect(invocation.shell).toBe("/bin/bash")
-    expect(invocation.env.OPENCODE_SANDBOX_WRAPPED_COMMAND).toBeUndefined()
-  })
-
-  test("enforce mode: wrap failure installs the blocked shim", async () => {
-    if (process.platform === "win32") return
-    process.env.OPENCODE_SANDBOX_CONFIG = JSON.stringify({ mode: "enforce" })
-    mockWrapWithSandbox.mockImplementation(() => Promise.reject(new Error("boom")))
-    const { hooks } = await setupPlugin()
-    const invocation = makeInvocation("/bin/zsh")
-
-    await hooks["create.before"]?.(invocation)
-
-    expect(invocation.command).toBe("echo hello")
-    const blockedPath = path.join(shimDir(), "blocked", "zsh")
+    const blockedPath = path.join(shimDir(), "blocked", "bash")
     expect(invocation.shell).toBe(blockedPath)
     const script = fs.readFileSync(blockedPath, "utf8")
     expect(script).toContain("command blocked")
   })
 
-  test("enforce mode: init failure installs the blocked shim", async () => {
+  test("init failure installs the blocked shim", async () => {
     if (process.platform === "win32") return
-    process.env.OPENCODE_SANDBOX_CONFIG = JSON.stringify({ mode: "enforce" })
     mockInitialize.mockImplementation(() => Promise.reject(new Error("no bwrap")))
     const { hooks } = await setupPlugin()
     const invocation = makeInvocation("/bin/ksh")
@@ -235,6 +224,32 @@ describe("plugin", () => {
     await hooks["create.before"]?.(invocation)
 
     expect(invocation.shell).toBe(path.join(shimDir(), "blocked", "ksh"))
+  })
+
+  test("skips sandboxing when toggled off", async () => {
+    if (process.platform === "win32") return
+    await toggleModule.setSandboxToggledOff(TEST_PROJECT, true)
+    const { hooks } = await setupPlugin()
+    const invocation = makeInvocation()
+
+    await hooks["create.before"]?.(invocation)
+
+    expect(invocation.shell).toBe("/bin/bash")
+    expect(invocation.env.OPENCODE_SANDBOX_WRAPPED_COMMAND).toBeUndefined()
+    expect(mockInitialize).not.toHaveBeenCalled()
+
+    await toggleModule.setSandboxToggledOff(TEST_PROJECT, false)
+  })
+
+  test("resumes sandboxing when toggled back on", async () => {
+    if (process.platform === "win32") return
+    const { hooks } = await setupPlugin()
+    const invocation = makeInvocation()
+
+    await hooks["create.before"]?.(invocation)
+
+    expect(invocation.shell).toBe(path.join(shimDir(), "sandbox", "bash"))
+    expect(invocation.env.OPENCODE_SANDBOX_WRAPPED_COMMAND).toBe("srt-wrapped: echo hello")
   })
 
   test("cleans up once per sandboxed shell on session.shell.ended", async () => {

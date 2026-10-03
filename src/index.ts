@@ -2,6 +2,7 @@ import { SandboxManager } from "@anthropic-ai/sandbox-runtime"
 import { Plugin } from "@opencode/plugin"
 import { loadConfig, resolveConfig } from "./config"
 import { ENFORCEMENT_MESSAGE, ensureShim } from "./shim"
+import { cleanupOldToggleFiles, isSandboxToggledOff } from "./toggle"
 
 export type { SandboxPluginConfig } from "./config"
 
@@ -23,25 +24,26 @@ export default Plugin.define({
       return
     }
 
-    const userConfig = await loadConfig(ctx.location.directory)
+    const projectDir = ctx.location.directory
+    const userConfig = await loadConfig(projectDir)
     if (userConfig.disabled) return
-    const enforce = userConfig.mode === "enforce"
+
+    await cleanupOldToggleFiles()
 
     if (process.platform === "win32") {
-      log(
-        enforce ? "error" : "warn",
-        "Windows sandboxing is not available; commands will be blocked in enforce mode or run without sandbox",
-      )
-      if (!enforce) return
+      log("error", "Windows sandboxing is not available; commands will be blocked")
       const registration = await ctx.shell.hook("create.before", async (invocation) => {
+        if (await isSandboxToggledOff(projectDir)) return
         invocation.shell = await ensureShim(invocation.shell, "blocked")
       })
-      return () => void registration.dispose()
+      return () => {
+        void registration.dispose()
+      }
     }
 
     // resolveConfig takes a project and a worktree directory; OpenCode plugin locations carry
     // only the session directory, which is the worktree in practice.
-    const runtimeConfig = resolveConfig(ctx.location.directory, ctx.location.directory, userConfig)
+    const runtimeConfig = resolveConfig(projectDir, projectDir, userConfig)
 
     let initialization: Promise<boolean> | undefined
     const ensureSandboxReady = () =>
@@ -53,10 +55,7 @@ export default Plugin.define({
           return true
         })
         .catch((err) => {
-          log(
-            "error",
-            `Failed to initialize; ${enforce ? "commands will be blocked" : "commands will run without sandbox"}: ${messageOf(err)}`,
-          )
+          log("error", `Failed to initialize; commands will be blocked: ${messageOf(err)}`)
           return false
         }))
 
@@ -74,6 +73,7 @@ export default Plugin.define({
     }
 
     const shellRegistration = await ctx.shell.hook("create.before", async (invocation) => {
+      if (await isSandboxToggledOff(projectDir)) return
       if (!invocation.command) return
 
       try {
@@ -97,10 +97,6 @@ export default Plugin.define({
         }
         invocation.shell = shimPath
       } catch (err) {
-        if (!enforce) {
-          log("warn", `Failed to sandbox command; running unsandboxed: ${messageOf(err)}`)
-          return
-        }
         log("error", `Failed to sandbox command; blocking it: ${messageOf(err)}`)
         try {
           invocation.shell = await ensureShim(invocation.shell, "blocked")

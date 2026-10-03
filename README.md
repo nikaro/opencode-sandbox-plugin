@@ -12,7 +12,7 @@ Every command the agent runs through OpenCode is wrapped with OS-level filesyste
 |----------|-----------|
 | **macOS** | `sandbox-exec` (Seatbelt profiles) |
 | **Linux** | `bubblewrap` (namespace isolation) |
-| **Windows** | Not yet supported (commands pass through in `permissive` mode and are blocked in `enforce` mode) |
+| **Windows** | Not yet supported (commands are blocked) |
 
 ## Install
 
@@ -164,7 +164,6 @@ If `XDG_CONFIG_HOME` is set, it is used instead of `~/.config`.
 ```json
 // ~/.config/opencode/sandbox.json
 {
-  "mode": "enforce",
   "filesystem": {
     "denyRead": ["~/.ssh", "~/.aws/credentials"],
     "allowRead": ["~/.ssh/id_ed25519.pub"],
@@ -249,18 +248,6 @@ Example allowing only the SSH public key to be read:
 OPENCODE_SANDBOX_CONFIG='{"filesystem":{"denyRead":["~/.ssh","~/.gnupg","~/.aws/credentials","~/.azure","~/.config/gcloud","~/.config/gh","~/.kube","~/.docker/config.json","~/.npmrc","~/.netrc","~/.env"],"allowRead":["~/.ssh/id_ed25519.pub"]}}' opencode
 ```
 
-### Enforcement mode
-
-The default mode is `permissive`: if the sandbox cannot initialize or wrap a command, the command runs without sandboxing.
-
-Set `mode` to `enforce` to block `bash` commands whenever sandboxing cannot be applied, including on unsupported platforms:
-
-```json
-{
-  "mode": "enforce"
-}
-```
-
 ### Disable
 
 ```bash
@@ -275,6 +262,14 @@ Or in any config file:
 }
 ```
 
+### Toggle
+
+The command palette offers **Toggle Sandbox**, which pauses and resumes sandboxing for the current project.
+
+Paused state is stored per project under `~/.cache/opencode-sandbox/toggle/` and survives restarts. It automatically re-enables after 7 days, so a sandbox is never left paused indefinitely.
+
+The status-bar badge reflects the current state: green `on`, yellow `paused`, subdued `off` — and updates immediately when toggled.
+
 ## How it works
 
 The plugin hooks the shell creation path, which OpenCode invokes for every command the agent runs:
@@ -286,7 +281,7 @@ The command string itself is left untouched, so OpenCode's built-in permission r
 
 Every shell OpenCode creates programmatically is covered — the shell tool and session shells. Interactive TUI terminals are spawned outside this path and are not sandboxed. Sandbox mount points are cleaned up when OpenCode reports the shell has ended, including interrupted and timed-out commands.
 
-A TUI entrypoint (`exports["./tui"]`, or `tui.ts` for local installs) adds a status-bar badge (`⊙ sandbox: enforce`) to the home and session footers — green for `enforce`, yellow for `permissive`, subdued when disabled. Enabling/disabling the `opencode-sandbox` plugin toggles the badge and the sandbox together.
+A TUI entrypoint (`exports["./tui"]`, or `tui.ts` for local installs) adds a status-bar badge (`⊙ sandbox: on`) to the home and session footers, reflecting the sandbox state including palette toggles (see [Toggle](#toggle)). Enabling/disabling the `opencode-sandbox` plugin toggles the badge, the palette command and the sandbox together.
 
 ```
 Agent → shell → [sandboxed execution] → Agent
@@ -298,11 +293,11 @@ Sandbox initialization is deferred until the first command, so the plugin does n
 
 ### Windows status
 
-`@anthropic-ai/sandbox-runtime` supports Windows through an argv-and-environment API that OpenCode's plugin interfaces do not expose. Until they can be connected safely, the plugin leaves Windows commands unsandboxed in `permissive` mode and blocks them in `enforce` mode.
+`@anthropic-ai/sandbox-runtime` supports Windows through an argv-and-environment API that OpenCode's plugin interfaces do not expose. Until they can be connected safely, the plugin blocks Windows commands.
 
 ### Failure behavior
 
-In the default `permissive` mode, commands run normally if sandbox initialization or wrapping fails. In `enforce` mode, the affected command is blocked instead.
+If sandbox initialization or wrapping fails, the affected command is blocked.
 
 ## Related
 
