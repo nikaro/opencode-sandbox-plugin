@@ -87,15 +87,9 @@ export function resolveConfig(
 
   const candidatePaths = [projectDir, worktree, os.tmpdir()].filter(Boolean)
   const safePaths = candidatePaths.filter((p) => isSafeWritePath(p))
-  const seen = new Set<string>()
-  const writePaths =
-    user?.filesystem?.allowWrite ??
-    safePaths.filter((p) => {
-      const resolved = path.resolve(p)
-      if (seen.has(resolved)) return false
-      seen.add(resolved)
-      return true
-    })
+  const writePaths = user?.filesystem?.allowWrite ?? [
+    ...new Set(safePaths.map((p) => path.resolve(p))),
+  ]
 
   return {
     filesystem: {
@@ -113,18 +107,6 @@ export function resolveConfig(
       allowLocalBinding: user?.network?.allowLocalBinding ?? false,
     },
   }
-}
-
-function xdgConfigDir(): string {
-  return process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config")
-}
-
-export function getLegacyConfigDir(): string {
-  return path.join(xdgConfigDir(), "opencode-sandbox")
-}
-
-export function getOpenCodeConfigDir(): string {
-  return path.join(xdgConfigDir(), "opencode")
 }
 
 async function tryLoadJsonFile(filePath: string): Promise<SandboxPluginConfig | null> {
@@ -161,25 +143,22 @@ export async function loadConfig(projectDir: string): Promise<SandboxPluginConfi
     )
   }
 
-  const legacyConfigDir = getLegacyConfigDir()
-  const openCodeConfigDir = getOpenCodeConfigDir()
+  const configBase = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config")
+  const legacyDir = path.join(configBase, "opencode-sandbox")
+  const standardDir = path.join(configBase, "opencode")
   const projectName = path.basename(projectDir)
 
-  const standardProjectConfig = await tryLoadJsonFile(
-    path.join(openCodeConfigDir, "projects", `${projectName}.sandbox.json`),
-  )
-  if (standardProjectConfig) return standardProjectConfig
+  const sources = [
+    path.join(standardDir, "projects", `${projectName}.sandbox.json`),
+    path.join(legacyDir, "projects", `${projectName}.json`),
+    path.join(standardDir, "sandbox.json"),
+    path.join(legacyDir, "config.json"),
+  ]
 
-  const legacyProjectConfig = await tryLoadJsonFile(
-    path.join(legacyConfigDir, "projects", `${projectName}.json`),
-  )
-  if (legacyProjectConfig) return legacyProjectConfig
-
-  const standardGlobalConfig = await tryLoadJsonFile(path.join(openCodeConfigDir, "sandbox.json"))
-  if (standardGlobalConfig) return standardGlobalConfig
-
-  const legacyGlobalConfig = await tryLoadJsonFile(path.join(legacyConfigDir, "config.json"))
-  if (legacyGlobalConfig) return legacyGlobalConfig
+  for (const source of sources) {
+    const config = await tryLoadJsonFile(source)
+    if (config) return config
+  }
 
   return {}
 }

@@ -2,13 +2,7 @@ import { afterAll, beforeEach, describe, expect, test } from "bun:test"
 import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
-import {
-  getLegacyConfigDir,
-  getOpenCodeConfigDir,
-  loadConfig,
-  resolveConfig,
-  type SandboxPluginConfig,
-} from "../src/config"
+import { loadConfig, resolveConfig, type SandboxPluginConfig } from "../src/config"
 
 const PROJECT_DIR = `/tmp/test-project-sandbox-${process.pid}`
 const CONFIG_DIR = `/tmp/test-sandbox-config-${process.pid}`
@@ -134,32 +128,6 @@ describe("resolveConfig", () => {
 
     expect(config.network?.allowUnixSockets).toEqual(["/var/run/docker.sock"])
     expect(config.network?.allowAllUnixSockets).toBe(false)
-  })
-})
-
-describe("getOpenCodeConfigDir", () => {
-  test("uses XDG_CONFIG_HOME when set", () => {
-    process.env.XDG_CONFIG_HOME = "/custom/config"
-    expect(getOpenCodeConfigDir()).toBe("/custom/config/opencode")
-    delete process.env.XDG_CONFIG_HOME
-  })
-
-  test("falls back to ~/.config when XDG_CONFIG_HOME is not set", () => {
-    delete process.env.XDG_CONFIG_HOME
-    expect(getOpenCodeConfigDir()).toBe(path.join(os.homedir(), ".config", "opencode"))
-  })
-})
-
-describe("getLegacyConfigDir", () => {
-  test("uses XDG_CONFIG_HOME when set", () => {
-    process.env.XDG_CONFIG_HOME = "/custom/config"
-    expect(getLegacyConfigDir()).toBe("/custom/config/opencode-sandbox")
-    delete process.env.XDG_CONFIG_HOME
-  })
-
-  test("falls back to ~/.config when XDG_CONFIG_HOME is not set", () => {
-    delete process.env.XDG_CONFIG_HOME
-    expect(getLegacyConfigDir()).toBe(path.join(os.homedir(), ".config", "opencode-sandbox"))
   })
 })
 

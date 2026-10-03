@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test"
-import { createOpencodeClient } from "@opencode-ai/sdk"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import { createOpencodeClient } from "@opencode-ai/sdk"
 
 // Mock the SandboxManager before importing the plugin
 const mockInitialize = mock(() => Promise.resolve())
@@ -45,9 +45,7 @@ describe("SandboxPlugin", () => {
 
   beforeAll(() => {
     testConfigHome = process.env.XDG_CONFIG_HOME
-    isolatedConfigHome = fs.mkdtempSync(
-      path.join(os.tmpdir(), "opencode-sandbox-plugin-test-"),
-    )
+    isolatedConfigHome = fs.mkdtempSync(path.join(os.tmpdir(), "opencode-sandbox-plugin-test-"))
     process.env.XDG_CONFIG_HOME = isolatedConfigHome
   })
 
