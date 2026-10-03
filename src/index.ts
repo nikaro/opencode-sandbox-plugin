@@ -38,8 +38,6 @@ export default Plugin.define({
       }
     }
 
-    // resolveConfig takes a project and a worktree directory; OpenCode plugin locations carry
-    // only the session directory, which is the worktree in practice.
     const runtimeConfig = resolveConfig(projectDir, projectDir, userConfig)
 
     let initialization: Promise<boolean> | undefined
@@ -75,10 +73,15 @@ export default Plugin.define({
 
       try {
         if (!(await ensureSandboxReady())) throw new Error("sandbox initialization failed")
+
+        // Resolve relative path globs against the shell's current working
+        // directory so sandbox rules track where commands actually run.
+        const invocationConfig = resolveConfig(invocation.cwd, invocation.cwd, userConfig)
+
         const wrapped = await SandboxManager.wrapWithSandbox(
           invocation.command,
           invocation.shell,
-          undefined,
+          { filesystem: invocationConfig.filesystem },
           undefined,
           { commandId: crypto.randomUUID(), commandText: invocation.command },
         )

@@ -252,6 +252,27 @@ describe("plugin", () => {
     expect(invocation.env.OPENCODE_SANDBOX_WRAPPED_COMMAND).toBe("srt-wrapped: echo hello")
   })
 
+  test("resolves relative globs against invocation cwd", async () => {
+    if (process.platform === "win32") return
+    process.env.OPENCODE_SANDBOX_CONFIG = JSON.stringify({
+      filesystem: {
+        denyRead: [".envrc"],
+      },
+    })
+    const { hooks } = await setupPlugin("/tmp/project")
+    const invocation = makeInvocation()
+    invocation.cwd = "/tmp/other-dir"
+
+    await hooks["create.before"]?.(invocation)
+
+    expect(mockWrapWithSandbox).toHaveBeenCalledTimes(1)
+    const customConfig = mockWrapWithSandbox.mock.calls[0][2]
+    expect(customConfig).toBeDefined()
+    expect(customConfig.filesystem).toBeDefined()
+    expect(customConfig.filesystem.denyRead).toContain("/tmp/other-dir/.envrc")
+    expect(customConfig.filesystem.denyRead).not.toContain("/tmp/project/.envrc")
+  })
+
   test("cleans up once per sandboxed shell on session.shell.ended", async () => {
     if (process.platform === "win32") return
     const { hooks, bus } = await setupPlugin()
