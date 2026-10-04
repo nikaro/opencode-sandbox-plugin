@@ -1,6 +1,12 @@
 import { SandboxManager } from "@anthropic-ai/sandbox-runtime"
 import { Plugin } from "@opencode/plugin"
-import { isSandboxGloballyDisabled, loadConfig, resolveConfig } from "./config"
+import {
+  isSandboxGloballyDisabled,
+  loadConfig,
+  resolveConfig,
+  type SandboxPluginConfig,
+} from "./config"
+import { runEnforcementProbe } from "./probe"
 import { ENFORCEMENT_MESSAGE, ensureShim } from "./shim"
 import { cleanupOldToggleFiles, isSandboxToggledOff } from "./toggle"
 
@@ -22,7 +28,32 @@ export default Plugin.define({
     }
 
     const projectDir = ctx.location.directory
-    const userConfig = await loadConfig(projectDir)
+
+    let userConfig: SandboxPluginConfig
+    try {
+      userConfig = await loadConfig(projectDir)
+    } catch (err) {
+      // A config file that was found but cannot be used must not fall through
+      // to weaker defaults — block commands instead, with the shim naming the
+      // problem so the failure is visible to the agent, not only the log.
+      const message = messageOf(err)
+      log(
+        "error",
+        `${message}; commands will be blocked until the config is fixed or the sandbox is toggled off`,
+      )
+      const registration = await ctx.shell.hook("create.before", async (invocation) => {
+        if (await isSandboxToggledOff(projectDir)) return
+        invocation.shell = await ensureShim(
+          invocation.shell,
+          "blocked",
+          `opencode-sandbox: command blocked — invalid sandbox config: ${message}`,
+        )
+      })
+      return () => {
+        void registration.dispose()
+      }
+    }
+
     if (userConfig.disabled) return
 
     await cleanupOldToggleFiles()
@@ -43,14 +74,20 @@ export default Plugin.define({
     let initialization: Promise<boolean> | undefined
     const ensureSandboxReady = () =>
       (initialization ??= SandboxManager.initialize(runtimeConfig)
+        // Initialization only proves the runtime configured itself; the probe
+        // proves seatbelt/bwrap actually enforce before the first real command.
+        .then(() => runEnforcementProbe())
         .then(() => {
           console.debug(
-            `[opencode-sandbox] initialized — writes allowed in: ${runtimeConfig.filesystem?.allowWrite?.join(", ")}`,
+            `[opencode-sandbox] initialized and enforcement verified — writes allowed in: ${runtimeConfig.filesystem?.allowWrite?.join(", ")}`,
           )
           return true
         })
         .catch((err) => {
-          log("error", `Failed to initialize; commands will be blocked: ${messageOf(err)}`)
+          log(
+            "error",
+            `Failed to initialize or verify the sandbox; commands will be blocked: ${messageOf(err)}`,
+          )
           return false
         }))
 

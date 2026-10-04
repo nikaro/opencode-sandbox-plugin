@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, test } from "bun:test"
 import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
-import { loadConfig, resolveConfig, type SandboxPluginConfig } from "../src/config"
+import { loadConfig, resolveConfig, type SandboxPluginConfig, validateConfig } from "../src/config"
 
 const PROJECT_DIR = `/tmp/test-project-sandbox-${process.pid}`
 const CONFIG_DIR = `/tmp/test-sandbox-config-${process.pid}`
@@ -244,12 +244,55 @@ describe("loadConfig", () => {
     expect(config.filesystem?.denyRead).toEqual(["/from-path"])
   })
 
-  test("handles invalid JSON in OPENCODE_SANDBOX_CONFIG_PATH gracefully", async () => {
+  test("invalid JSON in OPENCODE_SANDBOX_CONFIG_PATH throws instead of falling through", async () => {
     const customConfigPath = path.join(CONFIG_DIR, "broken.json")
     await fs.writeFile(customConfigPath, "broken{json")
     process.env.OPENCODE_SANDBOX_CONFIG_PATH = customConfigPath
+    await expect(loadConfig(PROJECT_DIR)).rejects.toThrow(
+      /Invalid JSON in config file.*broken\.json/,
+    )
+  })
+
+  test("invalid JSON in OPENCODE_SANDBOX_CONFIG throws", async () => {
+    process.env.OPENCODE_SANDBOX_CONFIG = "broken{json"
+    await expect(loadConfig(PROJECT_DIR)).rejects.toThrow("Invalid JSON in OPENCODE_SANDBOX_CONFIG")
+  })
+
+  test("invalid JSON in per-project config throws instead of weakening to defaults", async () => {
+    await fs.writeFile(
+      path.join(sandboxConfigDir, "projects", `${projectName}.json`),
+      "broken{json",
+    )
+    await expect(loadConfig(PROJECT_DIR)).rejects.toThrow(/Invalid JSON in config file/)
+  })
+
+  test("structurally invalid config throws with the offending key", async () => {
+    await fs.writeFile(
+      path.join(sandboxConfigDir, "projects", `${projectName}.json`),
+      JSON.stringify({ filesystem: { denyRead: "~/.ssh" } }),
+    )
+    await expect(loadConfig(PROJECT_DIR)).rejects.toThrow(
+      /filesystem\.denyRead must be an array of strings/,
+    )
+  })
+
+  test("non-boolean disabled throws", async () => {
+    process.env.OPENCODE_SANDBOX_CONFIG = JSON.stringify({ disabled: "yes" })
+    await expect(loadConfig(PROJECT_DIR)).rejects.toThrow("disabled must be a boolean")
+  })
+
+  test("unknown keys are ignored with a warning, not fatal", async () => {
+    process.env.OPENCODE_SANDBOX_CONFIG = JSON.stringify({
+      unknownFutureKey: true,
+      filesystem: { denyRead: ["/secret"], unknownSubKey: [] },
+    })
     const config = await loadConfig(PROJECT_DIR)
-    expect(config).toEqual({})
+    expect(config.filesystem?.denyRead).toEqual(["/secret"])
+  })
+
+  test("non-object config throws", async () => {
+    process.env.OPENCODE_SANDBOX_CONFIG = JSON.stringify(["denyRead"])
+    await expect(loadConfig(PROJECT_DIR)).rejects.toThrow("config must be a JSON object")
   })
 
   test("handles missing OPENCODE_SANDBOX_CONFIG_PATH file gracefully", async () => {
@@ -383,16 +426,43 @@ describe("loadConfig", () => {
     const config = await loadConfig(PROJECT_DIR)
     expect(config.filesystem?.denyRead).toEqual(["/from-project"])
   })
+})
 
-  test("handles invalid JSON in env var gracefully", async () => {
-    process.env.OPENCODE_SANDBOX_CONFIG = "not-valid-json"
-    const config = await loadConfig(PROJECT_DIR)
-    expect(config).toEqual({})
+describe("validateConfig", () => {
+  test("accepts a valid config with no diagnostics", () => {
+    const { errors, warnings } = validateConfig({
+      disabled: false,
+      filesystem: { denyRead: ["~/.ssh"], allowWrite: ["."] },
+      network: { allowedDomains: ["github.com"], allowLocalBinding: true },
+    })
+    expect(errors).toEqual([])
+    expect(warnings).toEqual([])
   })
 
-  test("handles invalid JSON in file gracefully", async () => {
-    await fs.writeFile(path.join(sandboxConfigDir, "config.json"), "broken{json")
-    const config = await loadConfig(PROJECT_DIR)
-    expect(config).toEqual({})
+  test("collects every structural error", () => {
+    const { errors } = validateConfig({
+      disabled: 1,
+      filesystem: "not an object",
+      network: { allowedDomains: "github.com", allowAllUnixSockets: "yes" },
+    })
+    expect(errors).toContain("disabled must be a boolean")
+    expect(errors).toContain("filesystem must be a JSON object")
+    expect(errors).toContain("network.allowedDomains must be an array of strings")
+    expect(errors).toContain("network.allowAllUnixSockets must be a boolean")
+  })
+
+  test("reports unknown keys as warnings only", () => {
+    const { errors, warnings } = validateConfig({
+      futureKey: true,
+      filesystem: { futureSubKey: [] },
+    })
+    expect(errors).toEqual([])
+    expect(warnings).toContain('ignoring unknown key "futureKey"')
+    expect(warnings).toContain('ignoring unknown key "filesystem.futureSubKey"')
+  })
+
+  test("rejects non-object roots", () => {
+    expect(validateConfig(["denyRead"]).errors).toEqual(["config must be a JSON object"])
+    expect(validateConfig(null).errors).toEqual(["config must be a JSON object"])
   })
 })

@@ -135,41 +135,110 @@ export function resolveConfig(
   }
 }
 
+const FILESYSTEM_KEYS = new Set(["denyRead", "allowRead", "allowWrite", "denyWrite"])
+const NETWORK_KEYS = new Set([
+  "allowedDomains",
+  "deniedDomains",
+  "allowUnixSockets",
+  "allowAllUnixSockets",
+  "allowLocalBinding",
+])
+
+const isStringArray = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((entry) => typeof entry === "string")
+
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err))
+
+/** Structural validation of a loaded config.
+ *
+ * `errors` are conditions the plugin cannot interpret safely — the caller must
+ * block commands rather than fall through to weaker defaults. `warnings` cover
+ * unknown keys, which may be written for a newer plugin version and are
+ * ignored without blocking. */
+export function validateConfig(config: unknown): { errors: string[]; warnings: string[] } {
+  const errors: string[] = []
+  const warnings: string[] = []
+  if (!isObject(config)) return { errors: ["config must be a JSON object"], warnings }
+
+  for (const [key, value] of Object.entries(config)) {
+    if (key === "disabled") {
+      if (typeof value !== "boolean") errors.push("disabled must be a boolean")
+    } else if (key === "filesystem" || key === "network") {
+      const knownKeys = key === "filesystem" ? FILESYSTEM_KEYS : NETWORK_KEYS
+      if (!isObject(value)) {
+        errors.push(`${key} must be a JSON object`)
+        continue
+      }
+      for (const [subKey, subValue] of Object.entries(value)) {
+        if (!knownKeys.has(subKey)) {
+          warnings.push(`ignoring unknown key "${key}.${subKey}"`)
+        } else if (subKey === "allowAllUnixSockets" || subKey === "allowLocalBinding") {
+          if (typeof subValue !== "boolean") errors.push(`${key}.${subKey} must be a boolean`)
+        } else if (!isStringArray(subValue)) {
+          errors.push(`${key}.${subKey} must be an array of strings`)
+        }
+      }
+    } else {
+      warnings.push(`ignoring unknown key "${key}"`)
+    }
+  }
+  return { errors, warnings }
+}
+
+/** Apply validation to a parsed config, throwing on structural errors so the
+ * caller fails closed instead of silently weakening to defaults. */
+function checkedConfig(source: string, config: unknown): SandboxPluginConfig {
+  const { errors, warnings } = validateConfig(config)
+  for (const warning of warnings) console.warn(`[opencode-sandbox] ${source}: ${warning}`)
+  if (errors.length > 0) throw new Error(`Invalid config (${source}): ${errors.join("; ")}`)
+  return config as SandboxPluginConfig
+}
+
 export function isSandboxGloballyDisabled(): boolean {
   return (
     process.env.OPENCODE_DISABLE_SANDBOX === "1" || process.env.OPENCODE_DISABLE_SANDBOX === "true"
   )
 }
 
-async function tryLoadJsonFile(filePath: string): Promise<SandboxPluginConfig | null> {
+/** Read and parse a config file. Missing files (ENOENT) return null so the
+ * search continues; a file that exists but cannot be read or parsed throws so
+ * the caller fails closed rather than skipping a restriction the user set. */
+async function readJsonConfig(filePath: string): Promise<unknown> {
   let content: string
   try {
     content = await fsPromises.readFile(filePath, "utf-8")
-  } catch {
-    return null
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null
+    throw new Error(`Cannot read config file ${filePath}: ${messageOf(err)}`)
   }
   try {
-    return JSON.parse(content) as SandboxPluginConfig
-  } catch {
-    console.warn(`[opencode-sandbox] Invalid JSON in config file: ${filePath}`)
-    return null
+    return JSON.parse(content)
+  } catch (err) {
+    throw new Error(`Invalid JSON in config file ${filePath}: ${messageOf(err)}`)
   }
 }
 
 export async function loadConfig(projectDir: string): Promise<SandboxPluginConfig> {
   const envConfig = process.env.OPENCODE_SANDBOX_CONFIG
   if (envConfig) {
+    let parsed: unknown
     try {
-      return JSON.parse(envConfig) as SandboxPluginConfig
-    } catch {
-      console.warn("[opencode-sandbox] Invalid JSON in OPENCODE_SANDBOX_CONFIG, using defaults")
+      parsed = JSON.parse(envConfig)
+    } catch (err) {
+      throw new Error(`Invalid JSON in OPENCODE_SANDBOX_CONFIG: ${messageOf(err)}`)
     }
+    return checkedConfig("OPENCODE_SANDBOX_CONFIG", parsed)
   }
 
   const envConfigPath = process.env.OPENCODE_SANDBOX_CONFIG_PATH
   if (envConfigPath) {
-    const customConfig = await tryLoadJsonFile(envConfigPath)
-    if (customConfig) return customConfig
+    const customConfig = await readJsonConfig(envConfigPath)
+    if (customConfig !== null) {
+      return checkedConfig(`OPENCODE_SANDBOX_CONFIG_PATH (${envConfigPath})`, customConfig)
+    }
     console.warn(
       `[opencode-sandbox] Failed to load config from OPENCODE_SANDBOX_CONFIG_PATH: ${envConfigPath}`,
     )
@@ -188,8 +257,8 @@ export async function loadConfig(projectDir: string): Promise<SandboxPluginConfi
   ]
 
   for (const source of sources) {
-    const config = await tryLoadJsonFile(source)
-    if (config) return config
+    const config = await readJsonConfig(source)
+    if (config !== null) return checkedConfig(source, config)
   }
 
   return {}

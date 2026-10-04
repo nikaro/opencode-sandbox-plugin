@@ -16,6 +16,9 @@ mock.module("@anthropic-ai/sandbox-runtime", () => ({
   },
 }))
 
+const mockRunEnforcementProbe = mock((_shell: string) => Promise.resolve())
+mock.module("../src/probe", () => ({ runEnforcementProbe: mockRunEnforcementProbe }))
+
 // Mock the plugin SDK: define() is an identity function in tests
 mock.module("@opencode/plugin", () => ({
   Plugin: { define: (plugin: unknown) => plugin },
@@ -129,6 +132,8 @@ describe("plugin", () => {
     mockWrapWithSandbox.mockReset()
     mockWrapWithSandbox.mockImplementation((cmd: string) => Promise.resolve(`srt-wrapped: ${cmd}`))
     mockCleanupAfterCommand.mockClear()
+    mockRunEnforcementProbe.mockReset()
+    mockRunEnforcementProbe.mockImplementation(() => Promise.resolve())
     delete process.env.OPENCODE_DISABLE_SANDBOX
     delete process.env.OPENCODE_SANDBOX_CONFIG
     delete process.env.OPENCODE_SANDBOX_CONFIG_PATH
@@ -224,6 +229,53 @@ describe("plugin", () => {
     await hooks["create.before"]?.(invocation)
 
     expect(invocation.shell).toBe(path.join(shimDir(), "blocked", "ksh"))
+  })
+
+  test("probe runs exactly once before the first command", async () => {
+    if (process.platform === "win32") return
+    const { hooks } = await setupPlugin()
+    await hooks["create.before"]?.(makeInvocation("/bin/zsh"))
+    await hooks["create.before"]?.(makeInvocation("/bin/bash"))
+
+    expect(mockRunEnforcementProbe).toHaveBeenCalledTimes(1)
+  })
+
+  test("probe failure installs the blocked shim", async () => {
+    if (process.platform === "win32") return
+    mockRunEnforcementProbe.mockImplementation(() =>
+      Promise.reject(new Error("the sandbox did not block a forbidden write")),
+    )
+    const { hooks } = await setupPlugin()
+    const invocation = makeInvocation()
+
+    await hooks["create.before"]?.(invocation)
+
+    expect(invocation.shell).toBe(path.join(shimDir(), "blocked", "bash"))
+  })
+
+  test("invalid config blocks commands with the reason in the shim", async () => {
+    process.env.OPENCODE_SANDBOX_CONFIG = "broken{json"
+    const { hooks } = await setupPlugin()
+    const invocation = makeInvocation()
+
+    await hooks["create.before"]?.(invocation)
+
+    expect(invocation.shell).toContain(path.join(shimDir(), "blocked"))
+    const script = fs.readFileSync(invocation.shell, "utf8")
+    expect(script).toContain("invalid sandbox config")
+    expect(script).toContain("Invalid JSON in OPENCODE_SANDBOX_CONFIG")
+  })
+
+  test("invalid config respects the toggle", async () => {
+    process.env.OPENCODE_SANDBOX_CONFIG = "broken{json"
+    await toggleModule.setSandboxToggledOff(TEST_PROJECT, true)
+    const { hooks } = await setupPlugin()
+    const invocation = makeInvocation()
+
+    await hooks["create.before"]?.(invocation)
+
+    expect(invocation.shell).toBe("/bin/bash")
+    await toggleModule.setSandboxToggledOff(TEST_PROJECT, false)
   })
 
   test("skips sandboxing when toggled off", async () => {
